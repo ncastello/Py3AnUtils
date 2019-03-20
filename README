@@ -1,0 +1,13 @@
+PySymUtils
+==========
+
+Configuring and managing Lyon, Altamira and other particle physics
+software related cluster jobs.
+
+
+INSTALLATION
+============
+
+```
+$ python setup.py install [--user]
+```

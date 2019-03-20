@@ -1,0 +1,359 @@
+#!/usr/bin/env python
+"""Generate macro files for Geant4 DAMICM-M simulations,
+as well as the bash script to run such simulations at a given cluster.
+
+"""
+### See isotops list at Lyon server
+###     $THRONG_DIR/Scripts/volumeT1Bulk.in
+###     $THRONG_DIR/Scripts/volumeT1Surface.in
+###
+Ab = [208,214,212,56,60,59,58,228,210,214,212,40,57,54,234,234,210,228,87]
+Zb = [81,83,83,27,27,26,27,89,83,82,82,19,27,25,90,91,82,88,37]
+isotopBulkDecay = list(zip(Zb,Ab))
+
+As = [208,214,212,228,210,214,212,210,228]
+Zs = [81,83,83,89,83,82,82,88]
+isotopSurfaceDecay = list(zip(Zs,As))
+
+### DEFINING GLOBAL VARIABLES for dosurface, and dovolume
+_ISBULK = True
+# min and maxim depth for simulations on the surface, in units um
+_MINDEPTH = 50
+_MAXDEPTH = 500
+
+
+def PrintInfo_IsotopInputFile():
+    mesg = """
+
+    isotop input file must have has 5 columns
+
+    A Z gunposition mindist maxdist
+
+    where gunposition can only be
+        0   for bulk decays, i.e. dovolume
+        SU  for surface decays using standard uniform embedding
+                mindist and maxdist are required to specified
+                the minimum and maximum embeding depth
+        SD  for surface decays using adcanved diffusion models
+                maxdist are required to specified the characteristic depth
+
+    """
+    print( mesg)
+    return
+
+def GetExcitationEnergy(A,Z):
+    if (Z=="91" and A=="234"):
+        excite_energy = 73.92
+    elif (Z=="47" and Z=="110"):
+        excite_energy = 117.59
+    else:
+        excite_energy = 0.0
+
+    return excite_energy
+
+def __GetDamicGunPosition(A,Z,mindepth=2,maxdepth=1000):
+    if (Z,A) in isotopBulkDecay:
+        ## bulk decay
+        doposition ="/damic/gun/position/dovolume\n"
+    elif (Z,A) in isotopSurfaceDecay:
+        ## surface decays using standard uniform embedding
+        doposition  ="/damic/gun/position/dosurface\n"
+        doposition +="/damic/gun/position/setminembeddist {0} nm\n".format(mindepth)
+        doposition +="/damic/gun/position/setmaxembeddist {0} nm\n".format(maxdepth)
+    else:
+        doposition ="/damic/gun/position/dovolume\n"
+
+    #    ## surface decays using advanced diffusion models
+    #    doposition = "/damic/gun/position/dosurface\n"
+    #    doposition +="/damic/gun/position/setadvdiffmodel true\n"
+    #    doposition +="/damic/gun/position/setmaxembeddist {0} nm\n".format(maxdepth)
+
+    return doposition
+
+def GetDamicGunPosition(A,Z):
+    if _ISBULK:
+        ## bulk decay
+        doposition ="/damic/gun/position/dovolume\n"
+    else:
+        ## surface decays using standard uniform embedding
+        doposition  ="/damic/gun/position/dosurface\n"
+        doposition = "/damic/gun/position/setadvdiffmodel true\n"
+        doposition +="/damic/gun/position/setminembeddist {0} nm\n".format(_MINDEPTH)
+        doposition +="/damic/gun/position/setmaxembeddist {0} nm\n".format(_MAXDEPTH)
+
+    #else:
+    #    doposition ="/damic/gun/position/dovolume\n"
+    #
+    #    ## surface decays using advanced diffusion models
+    #    doposition = "/damic/gun/position/dosurface\n"
+    #    doposition +="/damic/gun/position/setadvdiffmodel true\n"
+    #    doposition +="/damic/gun/position/setmaxembeddist {0} nm\n".format(maxdepth)
+
+    return doposition
+
+
+def GetDamicGunDirection(IsIsotropic, params=(True,False,False)):
+    if IsIsotropic:
+        ### DEFINE A DISTRIBUTION FOR THE PARTICLE GENERATION DIRECTION
+        ### params 0,180 -180 180
+        dodirection += "/damic/gun/direction/distri Isotropic"
+        dodirection += "/damic/gun/direction/thetamin 0\n"
+        dodirection += "/damic/gun/direction/thetamax 180\n"
+        dodirection += "/damic/gun/direction/phimin -180\n"
+        dodirection += "/damic/gun/direction/phimax 180\n"
+    else:
+        ### SINGLE DIRECTION
+        ### params is a boolean 3d vector, for instance  onedX,onedY,onedZ = True,False,False
+        dodirection = "/damic/gun/direction/oned\n"
+        for ind,eje in zip(range(0,3),['X','Y','Z']):
+            dodirection += "/damic/gun/direction/oned{0} {1}\n".format(eje,params[ind].real)
+
+    return dodirection
+
+def create_macros(fileprefix, folder, isotopList, volumeList, Ndecays, num_files):
+    """
+    search for dosurface and dovolume into  /pbs/throng/damic/Scripts
+    """
+
+    import random
+    random.seed(4)
+
+    isotopConcentrartion = '1'
+
+    nmacfile=1
+    for volume in volumeList:
+        for isotop  in isotopList:
+            A,Z = isotop
+            for nfile in range(1,num_files+1):
+                macroHeadLines  = "/control/verbose 0\n"
+                macroHeadLines += "/run/verbose 0\n"
+                macroHeadLines += "/run/initialize\n"
+                macroHeadLines += "/tracking/verbose 0\n"
+                macroHeadLines += "/event/verbose 0\n"
+                ### random seed
+                macroHeadLines += "/random/setSeeds {0} {1}\n".format(random.randint(0,50000),random.randint(0,50000))
+                ### isotop
+                macroHeadLines += "/damic/gun/particle ion\n"
+                ### Certain special decays equire setting the excitation energy of the state
+                exciteEnergy = GetExcitationEnergy(A,Z)
+                macroHeadLines += "/damic/gun/ion {0} {1} {2} {3}\n".format(Z,A,0,exciteEnergy)
+                macroHeadLines += "/damic/gun/energy/mono 0 eV\n"
+                ### Because radiative nucleus with 0nrj is simulated, the direction does not affect
+                dodirection = GetDamicGunDirection(False)
+                macroHeadLines += dodirection
+                ### Running decay on volume (bulk decay) or surface (only for elementos from the U chain)
+                ### according to the isotop
+                doposition = GetDamicGunPosition(A,Z)
+                macroHeadLines += doposition
+                ### Adding volume with the radioactive element concentration (assumed to be 1)
+                if not volume.count('_PV')>0:
+                    volume = volume+'_PV'    
+                macroHeadLines += "/damic/gun/position/addvolume {0} {1}\n".format(volume,isotopConcentrartion)
+                
+                ### name of the G4 simulated root output file
+                macroHeadLines += "/analysis/setFileName {0}_{1}a{2}z{3}_N{4}\n".format(volume,A,Z,nfile,Ndecays)
+                
+                ### events to be simulated for each isotope and file
+                macroHeadLines += "/run/beamOn {0}\n".format(Ndecays)
+                
+                ### save macro file
+                macoutfile = folder+'/macros/'+fileprefix+str(nmacfile)+'.mac'
+                outf = open(macoutfile,"w")
+                outf.writelines(macroHeadLines)
+                outf.close()
+                nmacfile+=1
+
+    return
+
+def CreateBashQsubLyonServer( outfilename, tmax, tmin, mac2simdir="/sps/hep/damic/ncastell/devDamicm/work/G4Run/mac2sim" ):
+
+    scriptHead = "#!/bin/bash\n"
+    scriptHead += "\n"
+    scriptHead += "####################################\n"
+    scriptHead += "# GE options\n"
+    scriptHead += "#####################################\n"
+    scriptHead += "\n"
+    scriptHead += "### Array jobs\n"
+    scriptHead += "#$ -t {0}-{1}\n".format(tmin,tmax)
+    scriptHead += "\n"
+    scriptHead += "#$ -l sps=1"
+    scriptHead += "#$ -q long"
+    scriptHead += "#$ -P P_damic"
+    scriptHead += ""
+    scriptHead += "###  Logs to out directory\n"
+    scriptHead += "#$ -o {0}/logs/\n".format(mac2simdir)
+    scriptHead += "#$ -e {0}/logs/\n".format(mac2simdir)
+    scriptHead += "#####################################\n"
+
+    scriptHead += "\n\n"
+    scriptHead += "### Useful paths\n"
+    scriptHead += "node_working_dir=`echo ${PWD}`\n"
+    scriptHead += "output_dir={0}\n".format(mac2simdir)
+    scriptHead += "src_dir=/pbs/home/n/ncastell/repos/DAMICM_G4Sims/DAMICMSims/DamicG4\n"
+    scriptHead += "\n\n"
+
+    scriptHead += """echo "-------------------------"\n"""
+    scriptHead += """echo "RUN copper frame job: ${SGE_TASK_ID}"\n"""
+    scriptHead += """echo "WORKING DIRECTORY: ${PWD}"\n"""
+    scriptHead += """echo "Set environment variables"\n"""
+    scriptHead += """echo "  root env"\n"""
+    scriptHead += "ccenv root\n"
+    scriptHead += """echo "  geant4 env"\n"""
+    scriptHead += "ccenv geant4\n"
+    scriptHead += "\n"
+
+    scriptHead += """echo "  software env"\n"""
+    scriptHead += "export PATH=${PATH}:/sps/hep/damic/ncastell/devDamicm/work/G4Run/build\n"
+
+    scriptHead += """echo "Copy gdml files"\n"""
+    scriptHead += "cp -r ${src_dir}/gdml ${node_working_dir}/\n"
+    scriptHead += "cp ${output_dir}/macros/"+outfilename+"${SGE_TASK_ID}.mac ${node_working_dir}/\n"
+    scriptHead += "\n"
+
+    scriptHead += """echo "Running Simulations: "\n"""
+    scriptHead += """echo " "\n"""
+    scriptHead += "DAMICG4 gdml/detector_main.gdml "+outfilename+"${SGE_TASK_ID}.mac\n"
+    scriptHead += """\n"""
+
+    scriptHead += """echo "Copy Simulation code and config.file to local directory" \n"""
+    scriptHead += """cp ${src_dir}/../analysis/SimulateImages/SimulateImages_damicm ${node_working_dir}/\n"""
+    scriptHead += """cp ${src_dir}/../analysis/SimulateImages/config_damicm.txt ${node_working_dir}/\n"""
+    scriptHead += "\n"
+    scriptHead += """outG4rootfile=`ls *.root`\n"""
+    scriptHead += "\n"
+    scriptHead += """echo "Prepare confi.file "\n"""
+    scriptHead += """sed -i 's/DDDDD/./g' config_damicm.txt\n"""
+    scriptHead += """sed -i 's/FFFFF/'"${outG4rootfile}"'/g' config_damicm.txt\n"""
+    scriptHead += "\n"
+    scriptHead += """echo " config file :: "\n"""
+    scriptHead += """cat config_damicm.txt\n"""
+    scriptHead += "\n"
+    scriptHead += """echo "Run SimulateImages code "\n"""
+    scriptHead += """SimulateImages_damicm config_damicm.txt\n"""
+    scriptHead += "\n"
+    scriptHead += """echo " SimulateImages done!!!!"\n"""
+    scriptHead += "\n"
+    scriptHead += """echo "Copy output files to our home: "\n"""
+    scriptHead += """cp ${outG4rootfile} ${output_dir}/outmac/\n"""
+    scriptHead += """rm ${outG4rootfile}\n"""
+
+    scriptHead += """outSIMIMGrootfile=`ls *.root`\n"""
+    scriptHead += """cp ${outSIMIMGrootfile} ${output_dir}/outsimimag\n"""
+    scriptHead += """echo "-------------------------" \n"""
+    scriptHead += "\n"
+    scriptHead += """echo " DONE! "\n"""
+    scriptHead += """echo "bye, bye!"\n"""
+
+    fout = open("runjobs_"+outfilename+".sh","w")
+    fout.writelines(scriptHead)
+    fout.close()
+
+    return
+
+
+##############################################################################################
+if __name__ == '__main__':
+    from optparse import OptionParser
+    from os.path import isfile
+    from os import mkdir
+    from scipy import loadtxt
+
+    parser =  OptionParser()
+    parser.add_option('-p', '--prefix', 
+            action='store',
+            dest='macroname',
+            help='Prefix name for the output macro files' )
+    parser.add_option('-o', '--outmac', 
+            action='store',
+            dest='outmacdir', 
+            help="Folder to be populated with the macro input files")
+    parser.add_option('-i', '--isotops', 
+            action='store',
+            dest='isotopsfile',
+            help="Input file with the isotopes information in a two column list format (A Z), to specify the number of rows to be sckipped use the char : separation, i.e. iso_file.in:3 ")
+    parser.add_option('-v', '--volumes', 
+            action='store',
+            dest='volumesfile',
+            help="Input file with the physical volume name in a column list format")
+    parser.add_option('-N', '--Nevents', 
+            action='store',
+            dest='numevents',
+            default="200000",
+            help="Number of events to be processed, i.e. /run/beamOn N (default 200000)")
+    parser.add_option('-r', '--replicate', 
+            action='store',
+            dest='numfiles',
+            default=1,
+            help="Each isotop will be splitted into 'r' files to run with N events each (default 1)")
+    parser.add_option('-b', '--isbulk', 
+            action='store',
+            dest='isbulk',
+            default=True,
+            help="Unset if the simulations must be done at the surface, in these case two other options are available, mindepth and maxdepth, 50 and 500 nm by default")
+    parser.add_option('--mindepth', 
+            action='store',
+            dest='mindepth',
+            default=50.0,
+            help="Mininum depth penetration for dosurface simulations")
+    parser.add_option('--maxdepth', 
+            action='store',
+            dest='maxdepth',
+            default=500.0,
+            help="Maximum depth penetration for dosurface simulations")
+ 
+
+    ( opt, args ) = parser.parse_args()
+
+    # Reading the list of isotops skipping Nskiprows rows from the file
+    try:
+        Nskiprows = int(opt.isotopsfile.split(':')[1])
+        isotops = opt.isotopsfile.split(':')[0]
+        print( "Removing {0} rows from the file {1}".format(Nskiprows,isotops))
+    except( IndexError,AttributeError):
+        isotops = opt.isotopsfile
+        Nskiprows = 0
+    if isfile(isotops):
+        isotopMatrix = loadtxt(isotops, dtype='str', unpack=True, skiprows=Nskiprows)
+        isotopMatrix = isotopMatrix.transpose()
+    else:
+        exit(-1)
+
+    # Reading the volume list
+    if isfile(opt.volumesfile):
+        volumeMatrix = loadtxt(opt.volumesfile, dtype='str', unpack=True)
+    if volumeMatrix.size <= 1:
+        volumeMatrix = [ volumeMatrix ]
+    else:
+        exit(-1)
+
+    print( volumeMatrix )
+
+    #### CREATING DIRECTORY STRUCTURE
+    mesg = """
+    directory structure
+        $./{0}/outmac     where simulated files should be stored
+        $./{0}/logs       where output log files from simulations should be stored
+        $./{0}/macros     where macro input files are stored
+
+    {1} macros have been generated
+
+    """.format(opt.outmacdir, opt.numfiles*len(isotopMatrix)*len(volumeMatrix))
+
+    print(mesg)
+    dir_structure =[ opt.outmacdir,opt.outmacdir+"/logs",opt.outmacdir+"/macros", opt.outmacdir+"/outmac"]
+    for subdir in dir_structure:
+        try:
+            mkdir(subdir)
+        except OSError:
+            pass
+    # setting some default global parameters for dosurface/dovolume simulations
+    _isBULK = opt.isbulk
+    _MINDEPTH = opt.mindepth
+    _MAXDEPTH = opt.maxdepth
+
+    create_macros( opt.macroname, opt.outmacdir, isotopMatrix, volumeMatrix, opt.numevents,opt.numfiles )
+    Tmax = opt.numfiles*len(isotopMatrix)*len(volumeMatrix)
+
+    #CreateBashQsubLyonServer( opt.macroname, Tmax, tmin=1, mac2simdir="/sps/hep/damic/ncastell/devDamicm/work/G4Run/mac2sim" )
+
+

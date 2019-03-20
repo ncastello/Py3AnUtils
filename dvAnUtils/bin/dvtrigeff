@@ -1,0 +1,235 @@
+#!/usr/bin/env python
+""":script:`dvtrigeff` -- Extract and build DV trigger efficiencies from ntuple
+===================================================
+
+.. script:: gettrigeff [options]    
+      :platform: unix
+      :synopsis: extract, build and plot trigger efficiencies from a ROOT ttree
+      The script has two working modes:
+        1. actually extract and build the trigger efficiencies found in a ROOT tree
+        and get MC information related. This working mode is highly dependent on
+        the ntuple datamembers. How to extract the information is encapsulated in
+        the .....
+        2. plotting the efficiencies previously obtained using the mode 1. This
+        mode is independent from any ntuple, so it can be used to genericaly 
+        plot efficiencies as far as the root input file keep the expected format:
+        TBranches of TEfficiency objects
+.. moduleauthor:: jordi duarte-campderros <jorge.duarte.campderros@cern.ch>
+"""
+DEBUG=False
+
+### Fent  
+## mc_prod_vx_x-mc_prod_vx_x[0])**2.+(mc_prod_vx_y-mc_prod_vx_y[0])**2)','mc_status == 1 && mc_pdgId[mc_parent_index] == 1000022'
+## no estic segur, pero tens la posicio del vertex on s'ha desintegrat el neutrali...
+## nota que el vertex primari, on ocurreix la primera interaccio (en el cas de RPV) es a mc_prod_vx_x,y,z[0]
+
+
+# FIXME:: To be implemented in trigeeffclass
+def getdr(t,i):
+    """
+    """
+    from math import sqrt
+    dx= t.mc_prod_vx_x[i]-t.mc_end_vx_x[i]
+    dy= t.mc_prod_vx_y[i]-t.mc_end_vx_y[i]
+    dz= t.mc_prod_vx_z[i]-t.mc_end_vx_z[i]
+    return sqrt(dx**2.+dy**2+dz**2.)
+
+# FIXME:: To be implemented in trigeeffclass
+def getindexllp(t):
+    """
+    """
+    nmc = t.mc_pdgId.size()
+    llpindex = []
+    for i in xrange(nmc):
+        #if t.mc_status[i] == 1 and t.mc_pdgId[t.mc_parent_index[i]] == 1000022:
+        #print t.mc_prod_vx_x[0],t.mc_end_vx_x[i]
+        if t.mc_status[i] == 2 and t.mc_pdgId[i] == 1000022 \
+                and getdr(t,i) > 1e-10: # Note patch for mc_parent_index|| Algo pasa
+            llpindex.append(i)#t.mc_parent_index[i])
+            if len(llpindex) >= 2:
+                return llpindex
+    print "WARNING::ONLY FOUND %i LLP! (Event:%i)" % (len(llpindex),t.GetEntry())
+
+def geteffinstance(rootfile):
+    """..function:: geteffinstance(rootfile) -> effsv
+    instantiate a effsv instance from a ROOT file.
+    This implies that the root file should contain:
+     * ROOT.TEfficiency objects with well defined names:
+        * effVARNAME_TRIGGERNAME
+     
+    :param rootfile: the file where to find the TEfficiency objects
+    :type  rootfile: str
+    """
+    import ROOT
+    from dvAnUtils.trigeffclass import effsv
+
+    f = ROOT.TFile.Open(rootfile)
+    # Get trigger names from the file in order 
+    # to instanciate the eff-class
+    trgnames = []
+    esv = effsv()
+    # Re-initializing the ORs
+    esv.grouptriggersOR = {}
+    for tkey in f.GetListOfKeys():
+        effname = tkey.GetName()
+        trname = esv.gettriggernamefrom(effname)
+        # The OR case
+        if trname.find('OR') == 0:
+            # Just filling the keys, not interested 
+            # in the trigger list
+            esv.grouptriggersOR[trname] = None 
+        varname = esv.getvarnamefrom(effname)
+        effobject = f.Get(effname)
+        effobject.SetDirectory(0)
+        esv.seteffobj(trname,varname,effobject)
+    f.Close()
+    return esv
+
+def create(folder,opt):
+    """.. function::create(opt)
+    create the efficiencies. Note that the gettreechain 
+    function 
+
+    :param opt: the user options
+    :type  opt: optparse.OptionParser
+    """
+    import glob
+    from dvAnUtils.trigeffclass import effsv,rpvmcinfo
+
+    print "Creating efficiencies from: "
+    ignorematching=not opt.activatematching
+    # Called to build the histograms from the n-tuples
+    rfiles = glob.glob(folder+'/*.root')
+    if len(rfiles) < 1:
+        raise RuntimeError('The folder "%s" doesn\'t contain'\
+                ' any root file' % folder)
+    message =''
+    for _fi in rfiles: 
+        message += os.path.basename(_fi)
+    # Init the RPVMCInfoTree file
+    rpvmc = rpvmcinfo(rfiles)
+    if opt.extraplots:
+        rpvmc.activate_plots()
+        rpvmc.activate_plots( ('eta','betagamma') )
+        rpvmc.activate_plots( ('dv_X','dv_Y') )
+        rpvmc.activate_plots( ('vx_LSP','vy_LSP') )
+    trnames = rpvmc.gettriggersnames()
+    #trarrays = setuptree(t,trnames)
+    #eff = dict(map(lambda x: (x,0),trarrays.keys()))
+    # Init efficiencies instance
+    effwrtsv = effsv(trnames,extravareff=opt.extravars,triggersOR=opt.triggersOR)
+    # loop over the entries
+    nentries = rpvmc.getentries()
+    print "Processing %i events" % nentries
+    message = "Evaluating MC-Truth Trigger efficiencies PER "
+    if ignorematching:
+        message+="EVENT"
+    else:
+        message+="DV object"
+    print message
+    for i in xrange(nentries):
+        _d = rpvmc.getentry(i)
+        trgdecisions = {}
+        for trname in trnames:
+            trgdecisions[trname] = rpvmc.get(trname)
+        # Do it once per event, not re-looping for each trigger
+        rpvmc.filleff(trgdecisions,effwrtsv,ignorematching,triggersOR=opt.triggersOR,extra=opt.extravars)
+    # Some summary statistics
+    effwrtsv.showresults()
+    # Saving info
+    effwrtsv.saverootfile(opt.outputfile)
+    # Do plots if have to
+    rpvmc.plots()
+
+def plot(rootfile,opt):
+    """.. function:: plot(opt)
+    ploting efficiencies
+
+    :param opt: the user options
+    :type  opt: optparse.OptionParser
+    """
+    import sys
+    effwrtsv = geteffinstance(rootfile)
+    if opt.suffixplot:
+        effwrtsv.setplotsuffix(opt.suffixplot)
+    if opt.extracttrlist:
+        print "Available trigger efficiencies in '%s'" % rootfile
+        for trigname in effwrtsv.gettrgnames():
+            print ":::%s" % trigname
+        sys.exit(0)
+    print "Extracting efficiencies from the '%s' file..." % rootfile
+    print "Plotting efficiencies..."
+    if opt.plotlist:
+        triglist = opt.plotlist.split(',')
+        for varname in opt.varlist.split(','):
+            effwrtsv.plot(triglist,varname)
+    else:
+        effwrtsv.plot()
+
+
+if __name__ == '__main__':
+    import os
+    from optparse import OptionParser,OptionGroup
+
+    usage='usage: %prog <create ROOTFILESPATH|plot FILEROOT.root>  [options]'
+    parser = OptionParser(usage)
+    parser.set_defaults(outputfile='output.root',\
+            varlist='Dtdv',extracttrlist=False,activatematching=False,suffixplot='.png',
+            extraplots=False,extravars=False,kinvar=False)
+
+    createopt = OptionGroup(parser,"Create options","Options to be used when the program is sent using"\
+               " 'create' argument. Note that this arguments needs the ROOTFILESPATH argument, the"\
+               " path where to find thre root files; if it is not provided, the working directory is used")
+    createopt.add_option( '-o', '--outputfile', action='store', type='string', dest='outputfile',\
+            help="Output root file name")
+    createopt.add_option( '-m', '--matching', action='store_true', \
+            dest = 'activatematching',help='The matching between a trigger object and the '\
+              'MC-displaced vertex tracks are checked')
+    createopt.add_option( '-x', '--extravars', action='store_true', \
+            dest = 'extravars',help='Includes efficiencies with respect extravariables')
+    createopt.add_option( '-t', '--triggersOR', action='store', metavar='TR1,TR2,TR3:TR2,TR4,..',\
+            dest = 'triggersOR',help='List of triggers to be used in the OR. The triggers separated by'\
+            ' "," are going to be ORed, while the semi-colon ":" separates group of OR triggers')
+    createopt.add_option( '-e', '--extraplots', action='store_true', \
+            dest = 'extraplots',help='Perform some extra plots related to the events, kinematics and'\
+              ' more')
+    parser.add_option_group(createopt)
+    
+    plotopt = OptionGroup(parser,"Plot options","Options to be used when the program is sent using"\
+               " 'plot' argument. A FILEROOT.root argument, the root file containing the efficiencies"\
+               " (generate with the 'create' argument) should be provided")
+    plotopt.add_option( '-p', '--plotlist', action='store', type='string', metavar='TRG1[,TRG2,...]',\
+            dest = 'plotlist',help='List of trigger chain to be plotted in the same canvas')
+    plotopt.add_option( '-v', '--varlist', action='store', type='string', metavar='VAR1[,VAR2,...]',\
+            dest = 'varlist',help='List of variables to be used by the "-p" option.')
+    plotopt.add_option( '-l', '--triggerlist', action='store_true', \
+            dest = 'extracttrlist',help='Just show the available triggers in the file and exit')
+    plotopt.add_option( '-k', '--kinvar', action='store_true', \
+            dest = 'kinvar',help='Perform also efficiencies w.r.t. kinematic variables from DV')
+    plotopt.add_option( '-s', '--suffixplot', action='store', \
+            dest = 'suffixplot',help='Format to used in the plots')
+    parser.add_option_group(plotopt)
+
+
+    (opt, args)=parser.parse_args()
+
+    # Working Mode 2: plotting trigger efficiencies
+    if len(args) < 1:
+        raise RuntimeError('The script needs either at least two arguments:\n\t'\
+                '<create ROOTFILEPATHS|plot ROOTFILE.root>')
+    elif args[0] == 'create':
+        # Working Mode 1: extracting trigger efficiencies
+        try:
+            folder=args[1]
+        except IndexError:
+            folder=os.getcwd()
+        create(folder,opt)
+    elif args[0] == 'plot':
+        if len(args) < 2:
+            raise RuntimeError('The \'plot\' mode needs another argument: \n'\
+                    'plot ROOTFILE.root')
+        # Working Mode 2: plotting
+        plot(args[1],opt)
+
+
+
