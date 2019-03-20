@@ -1,8 +1,7 @@
-PySymUtils
+Py3AnUtils
 ==========
 
-Configuring and managing Lyon, Altamira and other particle physics
-software related cluster jobs.
+Python3 module for PyAnUtils
 
 
 INSTALLATION
