@@ -20,7 +20,7 @@
 
 # Mimic the interpreter message
 CFGDIR=$(/usr/bin/env python-config --configdir)
-PYVERS=$(/usr/bin/env python -c "import sys; print 'Python {0}'.format(sys.version);")
+PYVERS=$(/usr/bin/env python -c "import sys; print( 'Python {0}'.format(sys.version));")
 echo ${PYVERS}
 echo ROOT `/usr/bin/env root-config --version`
 echo "======================================================= "

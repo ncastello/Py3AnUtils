@@ -117,7 +117,7 @@ class Bunch(object):
         """
         import ROOT
         from Py3AnUtils.plotstyles import get_sifca_style
-        st = get_sifca_style(stat_off=True)
+        st = get_sifca_style(squared=True,stat_off=True)
         st.cd()
         ROOT.gROOT.ForceStyle()
         if isinstance(fname,str):

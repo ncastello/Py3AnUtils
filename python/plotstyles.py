@@ -245,8 +245,8 @@ def njStyle():
     
     #marker settings
     njStyle.SetMarkerStyle(20);
-    njStyle.SetMarkerSize(0.6);
-    njStyle.SetLineWidth(2); 
+    njStyle.SetMarkerSize(0.8);
+    njStyle.SetLineWidth(3); 
 
     #done
     #njStyle.cd();
@@ -269,9 +269,10 @@ def get_sifca_style(squared=False,stat_off=False):
     #----------------------------------------------------------------------------
     sifcaStyle.SetTextFont(132)
     sifcaStyle.SetTextSize(0.045)
+
     sifcaStyle.SetLegendBorderSize(0)
     sifcaStyle.SetLegendFillColor(0)
-
+    sifcaStyle.SetLegendTextSize(0.065)
     
     #----------------------------------------------------------------------------
     # Canvas
@@ -295,10 +296,12 @@ def get_sifca_style(squared=False,stat_off=False):
     sifcaStyle.SetPadLeftMargin  (0.14)
     sifcaStyle.SetPadRightMargin (0.08)
     if squared:
-        sifcaStyle.SetCanvasDefH(700)
-        sifcaStyle.SetCanvasDefW(724)
+        sifcaStyle.SetCanvasDefH(1000)
+        sifcaStyle.SetCanvasDefW(1024)
         sifcaStyle.SetPadRightMargin (0.18)
     
+    sifcaStyle.SetPadTickX(1)
+    sifcaStyle.SetPadTickY(1)
     #----------------------------------------------------------------------------
     # Frame
     #----------------------------------------------------------------------------
@@ -330,10 +333,10 @@ def get_sifca_style(squared=False,stat_off=False):
     sifcaStyle.SetTitleBorderSize(    0)
     sifcaStyle.SetTitleFillColor (    0)
     if squared:
-        sifcaStyle.SetTitleX         (0.56)
+        sifcaStyle.SetTitleX(0.56)
     else:
-        sifcaStyle.SetTitleX         (0.5)
-    sifcaStyle.SetTitleAlign     (   23)
+        sifcaStyle.SetTitleX(0.5)
+    sifcaStyle.SetTitleAlign(12)
     sifcaStyle.SetTitleFont(132)
     sifcaStyle.SetTitleSize(0.045)
     
@@ -344,7 +347,7 @@ def get_sifca_style(squared=False,stat_off=False):
     sifcaStyle.SetStatBorderSize(0)
     sifcaStyle.SetStatColor(0)
     if stat_off:
-        sifcaStyle.SetOptStat       (0)
+        sifcaStyle.SetOptStat(0)
     
     #----------------------------------------------------------------------------
     # Axis
@@ -378,6 +381,12 @@ def get_sifca_style(squared=False,stat_off=False):
     # ---------------------------------------    
     sifcaStyle.SetNumberContours(99)
     
+
+    #marker settings
+    sifcaStyle.SetMarkerStyle(20);
+    sifcaStyle.SetMarkerSize(0.8);
+    sifcaStyle.SetLineWidth(3);
+
     return sifcaStyle
 
 def setpalette(name="rainbow", ncontours=99):
